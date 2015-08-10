@@ -10,21 +10,20 @@ import fs = require('fs');
 import path = require('path');
 import shell = require('shelljs');
 import webapi = require('./api/webapi');
+import Q = require('q');
 
 export class TaskManager {
-
-    constructor(workerContext: ctxm.WorkerContext, authHandler: ifm.IRequestHandler) {
-        this.context = workerContext;
-        this.taskApi = webapi.TaskApi(workerContext.config.settings.serverUrl, 
-                                      authHandler);
-        this.taskFolder = path.resolve(workerContext.config.settings.workFolder, 'tasks');
+    constructor(serviceContext: ctxm.ServiceContext, authHandler: ifm.IRequestHandler) {
+        this.context = serviceContext;
+        this.taskApi = webapi.TaskApi(serviceContext.config.settings.serverUrl, authHandler);
+        this.taskFolder = path.resolve(serviceContext.workFolder, 'tasks');
     }
 
-    public ensureTaskExists(task: ifm.TaskInstance, callback) : void {
+    public ensureTaskExists(task: ifm.TaskInstance): Q.IPromise<any> {
         if (!this.hasTask(task)) {
-            this.downloadTask(task, callback);
+            return this.downloadTask(task);
         } else {
-            callback(null);
+            return Q.resolve(null);
         }
     }
 
@@ -36,7 +35,7 @@ export class TaskManager {
         }
     }
 
-    public ensureTasksExist(tasks: ifm.TaskInstance[], callback: (err: any) => void) : void {
+    public ensureTasksExist(tasks: ifm.TaskInstance[]): Q.IPromise<any> {
         // Check only once for each id/version combo
         var alreadyAdded = {};
         var uniqueTasks = [];
@@ -49,18 +48,20 @@ export class TaskManager {
             }
         }
         
-        var _this: TaskManager = this;
-        async.forEach(tasks, function(task, callreturn) {
-            _this.ensureTaskExists(task, callreturn);
-        }, callback);
+        var promises = tasks.map((task: ifm.TaskInstance) => {
+            return this.ensureTaskExists(task);
+        });
+        
+        return Q.all(promises);
     }
 
-    public ensureLatestExist(callback: (err: any) => void) : void {
+    public ensureLatestExist(): Q.IPromise<any> {
+        var deferred = Q.defer();
+        
         // Get all tasks
         this.taskApi.getTasks(null, (err, status, tasks) => {
             if (err) {
-                callback(err);
-                return;
+                deferred.reject(err);
             }
 
             // Sort out only latest versions
@@ -80,28 +81,39 @@ export class TaskManager {
             }
 
             // Call ensureTasksExist for those
-            this.ensureTasksExist(latestTasks, callback);
+            this.ensureTasksExist(latestTasks).then(() => {
+                deferred.resolve(null);
+            }, (err: any) => {
+                deferred.reject(err);
+            });
         });
+        
+        return deferred.promise;
     }
 
-    private downloadTask(task: ifm.TaskInstance, callback: (err: any) => void): void {
+    private downloadTask(task: ifm.TaskInstance): Q.IPromise<any> {
+        var deferred = Q.defer();
         var taskPath = this.getTaskPath(task);
         shell.mkdir('-p', taskPath);
+        
+        this.context.trace("Downloading task " + task.id + " v" + task.version + " to " + taskPath);
         this.taskApi.downloadTask(task.id, task.version, taskPath + '.zip', (err, statusCode) => {
             if (err) {
-                callback(err);
-                return;
+                deferred.reject(err);
             }
 
             cm.extractFile(taskPath + '.zip', taskPath, (err) => {
                 if (err) {
                     shell.rm('-rf', taskPath);
+                    deferred.reject(err);
                 }
 
                 shell.rm('-rf', taskPath + '.zip');
-                callback(err);
+                deferred.resolve(null);
             });
         });
+        
+        return deferred.promise;
     }
 
     private getTaskPath(task: ifm.TaskInstance) : string {
@@ -112,7 +124,7 @@ export class TaskManager {
         return <ifm.TaskInstance>{'id':task.id, 'name': task.name, 'version': cm.versionStringFromTaskDef(task)}
     }
 
-    private context: ctxm.WorkerContext;
+    private context: ctxm.ServiceContext;
     private taskApi: ifm.ITaskApi;
     private taskFolder: string;
 }

@@ -93,17 +93,17 @@ export class ServiceChannel extends events.EventEmitter implements cm.IFeedbackC
     constructor(agentUrl: string,
                 collectionUrl: string,
                 jobInfo: cm.IJobInfo,
-                workerCtx: ctxm.WorkerContext) {
+                serviceCtx: ctxm.ServiceContext) {
         super();
 
-        ensureTrace(workerCtx);
+        ensureTrace(serviceCtx);
         trace.enter('ServiceChannel');
 
         this.agentUrl = agentUrl;
         this.collectionUrl = collectionUrl;
 
         this.jobInfo = jobInfo;
-        this.workerCtx = workerCtx;
+        this.serviceCtx = serviceCtx;
 
         this._recordCount = 0;
         this._issues = {};
@@ -115,7 +115,7 @@ export class ServiceChannel extends events.EventEmitter implements cm.IFeedbackC
         this._buildApi = webapi.QBuildApi(collectionUrl, jobInfo.systemAuthHandler);
 
         this._totalWaitTime = 0;
-        this._lockRenewer = new LockRenewer(jobInfo, workerCtx.config.poolId, this._agentApi);
+        this._lockRenewer = new LockRenewer(jobInfo, serviceCtx.config.poolId, this._agentApi);
 
         // pass the jobAbandoned event up to the owner
         this._lockRenewer.on(Events.JobAbandoned, () => {
@@ -147,10 +147,10 @@ export class ServiceChannel extends events.EventEmitter implements cm.IFeedbackC
             TIMELINE_DELAY);
 
         // console lines
-        this._consoleQueue = new WebConsoleQueue(this, this.workerCtx, CONSOLE_DELAY);
+        this._consoleQueue = new WebConsoleQueue(this, this.serviceCtx, CONSOLE_DELAY);
 
         // log pages
-        this._logPageQueue = new LogPageQueue(this, this.workerCtx, LOG_DELAY);
+        this._logPageQueue = new LogPageQueue(this, this.serviceCtx, LOG_DELAY);
 
         this._timelineRecordQueue.startProcessing();
         this._consoleQueue.startProcessing();
@@ -161,7 +161,7 @@ export class ServiceChannel extends events.EventEmitter implements cm.IFeedbackC
     public agentUrl: string;
     public collectionUrl: string;
     
-    public workerCtx: ctxm.WorkerContext;
+    public serviceCtx: ctxm.ServiceContext;
     public jobInfo: cm.IJobInfo;
 
     private _totalWaitTime: number;
@@ -471,8 +471,8 @@ export class WebConsoleQueue extends BaseQueue<string> {
     private _jobInfo: cm.IJobInfo;
     private _timelineApi: ifm.ITimelineApi;
 
-    constructor(feedback: cm.IFeedbackChannel, workerCtx: ctxm.WorkerContext, msDelay: number) {
-        super(workerCtx, msDelay);
+    constructor(feedback: cm.IFeedbackChannel, serviceCtx: ctxm.ServiceContext, msDelay: number) {
+        super(serviceCtx, msDelay);
         this._jobInfo = feedback.jobInfo;
         this._timelineApi = feedback.timelineApi;
     }
@@ -567,15 +567,15 @@ export class LogPageQueue extends BaseQueue<cm.ILogPageInfo> {
     private _recordToLogIdMap: { [recordId: string]: number } = {};
     private _jobInfo: cm.IJobInfo;
     private _timelineApi: ifm.ITimelineApi;
-    private _workerCtx: ctxm.WorkerContext;
+    private _workerCtx: ctxm.ServiceContext;
     private _service: cm.IFeedbackChannel;
 
-    constructor(service: cm.IFeedbackChannel, workerCtx: ctxm.WorkerContext, msDelay: number) {
-        super(workerCtx, msDelay);
+    constructor(service: cm.IFeedbackChannel, serviceCtx: ctxm.ServiceContext, msDelay: number) {
+        super(serviceCtx, msDelay);
         this._service = service;
         this._jobInfo = service.jobInfo;
         this._timelineApi = service.timelineApi;
-        this._workerCtx = workerCtx;
+        this._workerCtx = serviceCtx;
     }
 
     public _processQueue(logPages: cm.ILogPageInfo[], callback: (err: any) => void): void {
